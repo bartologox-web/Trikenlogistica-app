@@ -772,28 +772,35 @@ async function generarEtiquetasDesdeImport() {
     sel.forEach(r=>{
       const esStock=r.tipo==='stock';
       const cant=r.bultos; // ahora también ajustable para stock, no solo Math.ceil(cantidad)
-      // Usamos el detalle de la planilla de referencia si la cantidad de bultos
-      // es exactamente ese desglose (1 unidad) o un múltiplo exacto (varias
-      // unidades completas, ej. 2 camas x 5 piezas = 10 bultos). Si no encaja
-      // ninguna de las dos, no se asigna detalle para no adjudicar mal una pieza.
+      // Si el producto tiene un desglose conocido (ej. 5 piezas) y la cantidad
+      // de bultos es un múltiplo exacto, generamos un JUEGO COMPLETO por cada
+      // unidad (1/5, 2/5...5/5 para la primera cama, 1/5...5/5 para la
+      // segunda, etc.) en vez de numerar todo corrido hasta el total. Cada
+      // juego lleva su propio loteId, así "faltan bultos" no mezcla camas
+      // distintas entre sí.
       const refBase=r.codigoCentum?DETALLE_BULTOS[r.codigoCentum]:null;
       const refDetalle=(refBase && cant%refBase.length===0)?refBase:null;
-      for(let b=1;b<=cant;b++){
-        base++;
-        const seq=String(base).padStart(4,'0');
-        const rnd=Math.random().toString(36).substring(2,5).toUpperCase();
-        const p={
-          codigo:`MBT-${year}-${seq}-${rnd}`,
-          codigoCentum:r.codigoCentum, tipo:r.producto, tipoProd:r.tipo,
-          cantidadCentum:r.cantidad, bultoNum:b,
-          bultosTotal:cant, detalleBulto:refDetalle?refDetalle[(b-1)%refDetalle.length]:null, seccion:r.seccion,
-          comprobante:r.comprobante, comprobanteId:r.comprobanteId||'',
-          division:r.division||'', obs:r.obs,
-          estado:'fabrica', fechaCreacion:new Date().toISOString(),
-          fechaSalida:null, fechaRecepcion:null
-        };
-        nuevos.push(p);
-        total++;
+      const refLen=refDetalle?refDetalle.length:cant;
+      const cantJuegos=refDetalle?(cant/refLen):1;
+      for(let u=0;u<cantJuegos;u++){
+        const loteId=Math.random().toString(36).substring(2,8);
+        for(let bb=1;bb<=refLen;bb++){
+          base++;
+          const seq=String(base).padStart(4,'0');
+          const rnd=Math.random().toString(36).substring(2,5).toUpperCase();
+          const p={
+            codigo:`MBT-${year}-${seq}-${rnd}`,
+            codigoCentum:r.codigoCentum, tipo:r.producto, tipoProd:r.tipo,
+            cantidadCentum:r.cantidad, bultoNum:bb,
+            bultosTotal:refLen, loteId, detalleBulto:refDetalle?refDetalle[bb-1]:null, seccion:r.seccion,
+            comprobante:r.comprobante, comprobanteId:r.comprobanteId||'',
+            division:r.division||'', obs:r.obs,
+            estado:'fabrica', fechaCreacion:new Date().toISOString(),
+            fechaSalida:null, fechaRecepcion:null
+          };
+          nuevos.push(p);
+          total++;
+        }
       }
     });
     // Save to Firebase or local
@@ -1212,9 +1219,10 @@ function parseCodigo(raw){
 function bultosPendientesGrupo(prod, estadoAnterior){
   if(!prod.bultosTotal || prod.bultosTotal<=1) return null;
   const hermanos = productos.filter(p=>
-    p.codigoCentum===prod.codigoCentum &&
-    p.bultosTotal===prod.bultosTotal &&
-    (prod.comprobante ? p.comprobante===prod.comprobante : true)
+    prod.loteId ? (p.loteId===prod.loteId) :
+    (p.codigoCentum===prod.codigoCentum &&
+     p.bultosTotal===prod.bultosTotal &&
+     (prod.comprobante ? p.comprobante===prod.comprobante : true))
   );
   const pendientes = hermanos.filter(p=>p.estado===estadoAnterior).sort((a,b)=>a.bultoNum-b.bultoNum);
   if(!pendientes.length) return null;
