@@ -338,8 +338,9 @@ tr:hover td{background:var(--surface2);}
       <div style="font-size:14px;color:var(--muted);">Arrastrá el archivo acá o <strong style="color:var(--purple);">hacé clic para seleccionar</strong></div>
       <div style="font-size:11px;color:var(--muted);margin-top:4px;">Reporte diario .xlsx de Centum Suite</div>
     </div>
-    <div style="text-align:center;margin-top:12px;">
+    <div style="text-align:center;margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
       <button class="btn btn-sm btn-outline" onclick="cargarDatosPrueba()">🧪 Probar con datos de ejemplo (sin subir archivo)</button>
+      <button class="btn btn-sm btn-outline" onclick="mostrarCrearManual()">✏️ Crear etiqueta manual</button>
     </div>
   </div>
   <div id="import-preview" style="display:none;">
@@ -1155,6 +1156,93 @@ function eliminarProducto(codigo){
 // se generó con 2 bultos, pero en realidad necesita 2 más). Renumera todo el
 // grupo existente (1/2, 2/2 -> 1/4, 2/4, 3/4, 4/4) y crea los nuevos, listos
 // para imprimir desde Etiquetas.
+// Crea una o varias etiquetas desde cero con el código/producto que el
+// usuario elija, sin depender de que esté en el Excel importado — para
+// productos sueltos o mientras la base de datos de referencia está incompleta.
+function mostrarCrearManual(){
+  const overlay=document.createElement('div');
+  overlay.id='crear-manual-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:440px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <span style="font-size:24px;">✏️</span>
+        <h3 style="font-size:16px;font-weight:700;margin:0;">Crear etiqueta manual</h3>
+      </div>
+      <div class="form-group">
+        <label>Código Centum (SKU)</label>
+        <input type="text" id="man-sku" placeholder="Ej: MUECAM00123" style="text-transform:uppercase;">
+      </div>
+      <div class="form-group">
+        <label>Nombre del producto</label>
+        <input type="text" id="man-nombre" placeholder="Ej: Cama Nido Light">
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="man-tipo">
+          <option value="pedido">Pedido de cliente</option>
+          <option value="stock">Para stock</option>
+        </select>
+      </div>
+      <div class="form-group" id="man-comprobante-wrap">
+        <label>Nº de pedido (opcional)</label>
+        <input type="text" id="man-comprobante" placeholder="Ej: 000001-00026511">
+      </div>
+      <div class="form-group">
+        <label>Cantidad de bultos</label>
+        <input type="number" id="man-bultos" min="1" max="99" value="1">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px;">
+        <button class="btn btn-outline" onclick="document.getElementById('crear-manual-overlay').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="ejecutarCrearManual()">✏️ Crear etiquetas</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('man-tipo').addEventListener('change', function(){
+    document.getElementById('man-comprobante-wrap').style.display = this.value==='pedido'?'':'none';
+  });
+}
+async function ejecutarCrearManual(){
+  const sku=document.getElementById('man-sku').value.trim().toUpperCase();
+  const nombre=document.getElementById('man-nombre').value.trim();
+  const tipoProd=document.getElementById('man-tipo').value;
+  const comprobante=document.getElementById('man-comprobante').value.trim();
+  const cant=Math.max(1,parseInt(document.getElementById('man-bultos').value)||1);
+  if(!nombre){toast('Ingresá el nombre del producto','error');return;}
+
+  const overlay=document.getElementById('crear-manual-overlay');
+  if(overlay)overlay.remove();
+
+  const refBase=sku?DETALLE_BULTOS[sku]:null;
+  const year=new Date().getFullYear();
+  let base=productos.length;
+  const loteId=Math.random().toString(36).substring(2,8);
+  const nuevos=[];
+  for(let b=1;b<=cant;b++){
+    base++;
+    const seq=String(base).padStart(4,'0');
+    const rnd=Math.random().toString(36).substring(2,5).toUpperCase();
+    nuevos.push({
+      codigo:`MBT-${year}-${seq}-${rnd}`,
+      codigoCentum:sku||'', tipo:nombre, tipoProd,
+      cantidadCentum:cant, bultoNum:b, bultosTotal:cant,
+      loteId, detalleBulto:refBase?refBase[(b-1)%refBase.length]:null,
+      seccion:tipoProd==='pedido'?'PEDIDOS':'STOCK',
+      comprobante:tipoProd==='pedido'?comprobante:'', comprobanteId:'',
+      division:'', obs:'',
+      estado:'fabrica', fechaCreacion:new Date().toISOString(),
+      fechaSalida:null, fechaRecepcion:null
+    });
+  }
+  productos.push(...nuevos);
+  save();
+  updateStats();
+  showPanel('etiquetas',null);
+  toast(`✏️ ${cant} etiqueta${cant>1?'s':''} creada${cant>1?'s':''} para "${nombre}"`,'success');
+
+  for(const np of nuevos){ await fbSave(np); }
+}
 function mostrarAgregarBultos(codigo){
   const p=productos.find(x=>x.codigo===codigo);
   if(!p||!p.bultosTotal)return;
