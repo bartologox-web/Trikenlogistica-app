@@ -1151,6 +1151,89 @@ function eliminarProducto(codigo){
   `;
   document.body.appendChild(overlay);
 }
+// Agrega bultos extra a un pedido/lote que ya fue generado (ej. "Cama Pilares"
+// se generó con 2 bultos, pero en realidad necesita 2 más). Renumera todo el
+// grupo existente (1/2, 2/2 -> 1/4, 2/4, 3/4, 4/4) y crea los nuevos, listos
+// para imprimir desde Etiquetas.
+function mostrarAgregarBultos(codigo){
+  const p=productos.find(x=>x.codigo===codigo);
+  if(!p||!p.bultosTotal)return;
+  const overlay=document.createElement('div');
+  overlay.id='agregar-bultos-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span style="font-size:24px;">➕</span>
+        <h3 style="font-size:16px;font-weight:700;margin:0;">Agregar bultos</h3>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:6px;">
+        <strong style="color:var(--text);">${p.tipo}</strong> — actualmente ${p.bultosTotal} bulto${p.bultosTotal>1?'s':''}${p.comprobante?` (pedido ${p.comprobante})`:''}
+      </p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Se van a renumerar los bultos existentes y crear los nuevos en Fábrica, listos para imprimir.</p>
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">¿Cuántos bultos más agregar?</label>
+      <input type="number" id="cant-bultos-extra" min="1" max="50" value="1" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;margin-bottom:18px;">
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-outline" onclick="document.getElementById('agregar-bultos-overlay').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="ejecutarAgregarBultos('${codigo}')">➕ Agregar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+async function ejecutarAgregarBultos(codigo){
+  const overlay=document.getElementById('agregar-bultos-overlay');
+  const cantExtra=parseInt(document.getElementById('cant-bultos-extra').value)||0;
+  if(overlay)overlay.remove();
+  if(cantExtra<=0)return;
+
+  const p=productos.find(x=>x.codigo===codigo);
+  if(!p)return;
+
+  const hermanos=productos.filter(pr=>
+    p.loteId ? pr.loteId===p.loteId :
+    (pr.codigoCentum===p.codigoCentum && pr.bultosTotal===p.bultosTotal &&
+     (p.comprobante ? pr.comprobante===p.comprobante : true))
+  );
+  const totalViejo=p.bultosTotal;
+  const totalNuevo=totalViejo+cantExtra;
+
+  // Renumerar los existentes con el nuevo total
+  hermanos.forEach(pr=>{ pr.bultosTotal=totalNuevo; });
+
+  const refBase=p.codigoCentum?DETALLE_BULTOS[p.codigoCentum]:null;
+  const year=new Date().getFullYear();
+  let base=productos.length;
+  const nuevos=[];
+  for(let b=totalViejo+1;b<=totalNuevo;b++){
+    base++;
+    const seq=String(base).padStart(4,'0');
+    const rnd=Math.random().toString(36).substring(2,5).toUpperCase();
+    nuevos.push({
+      codigo:`MBT-${year}-${seq}-${rnd}`,
+      codigoCentum:p.codigoCentum, tipo:p.tipo, tipoProd:p.tipoProd,
+      cantidadCentum:p.cantidadCentum, bultoNum:b, bultosTotal:totalNuevo,
+      loteId:p.loteId, detalleBulto:refBase?refBase[(b-1)%refBase.length]:null,
+      seccion:p.seccion, comprobante:p.comprobante, comprobanteId:p.comprobanteId||'',
+      division:p.division||'', obs:p.obs,
+      estado:'fabrica', fechaCreacion:new Date().toISOString(),
+      fechaSalida:null, fechaRecepcion:null
+    });
+  }
+  productos.push(...nuevos);
+  save();
+  updateStats();
+  renderInventario();
+  renderStockCards();
+  toast(`➕ ${cantExtra} bulto${cantExtra>1?'s':''} agregado${cantExtra>1?'s':''} — total ahora ${totalNuevo}`,'success');
+
+  const db=window._db;
+  const fbReady=window._fbReady;
+  if(fbReady && db && window._fbFns){
+    for(const pr of hermanos){ await fbUpdate(pr); }
+    for(const np of nuevos){ await fbSave(np); }
+  }
+}
 async function ejecutarEliminarProducto(codigo){
   const overlay = document.getElementById('confirm-delete-overlay');
   if (overlay) overlay.remove();
@@ -1357,7 +1440,10 @@ function renderInventario(){
     <td>${estadoBadge(p.estado)}</td>
     <td style="font-size:10px;color:var(--muted);">${formatFecha(p.fechaCreacion)}</td>
     <td style="font-size:10px;color:var(--muted);">${p.fechaRecepcion?formatFecha(p.fechaRecepcion):'—'}</td>
-    <td><button class="btn-icon-del" title="Eliminar bulto" onclick="eliminarProducto('${p.codigo}')">🗑</button></td>
+    <td>
+      ${p.bultosTotal?`<button class="btn-icon-del" title="Agregar bultos a este pedido" onclick="mostrarAgregarBultos('${p.codigo}')">➕</button>`:''}
+      <button class="btn-icon-del" title="Eliminar bulto" onclick="eliminarProducto('${p.codigo}')">🗑</button>
+    </td>
   </tr>`).join('')}</tbody></table>`;
 }
 
