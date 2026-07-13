@@ -1177,8 +1177,11 @@ function mostrarCrearManual(){
   // Junta códigos/nombres ya usados antes (historial de productos) + los 87
   // de la tabla de referencia, para sugerir mientras se escribe.
   const nombresPorCodigo={};
-  Object.keys(NOMBRES_REFERENCIA).forEach(cod=>{ if(NOMBRES_REFERENCIA[cod]) nombresPorCodigo[cod]=NOMBRES_REFERENCIA[cod]; });
+  // La tabla de referencia (verificada a mano con la planilla de pesos) tiene
+  // prioridad sobre el historial — así un error de tipeo/importación en una
+  // etiqueta pasada no contamina el autocompletado para siempre.
   productos.forEach(p=>{ if(p.codigoCentum && p.tipo) nombresPorCodigo[p.codigoCentum]=p.tipo; });
+  Object.keys(NOMBRES_REFERENCIA).forEach(cod=>{ if(NOMBRES_REFERENCIA[cod]) nombresPorCodigo[cod]=NOMBRES_REFERENCIA[cod]; });
   Object.keys(DETALLE_BULTOS).forEach(cod=>{ if(!nombresPorCodigo[cod]) nombresPorCodigo[cod]=''; });
   const codigosConocidos=Object.keys(nombresPorCodigo).sort();
   const nombresConocidos=[...new Set(Object.values(nombresPorCodigo).filter(Boolean))].sort();
@@ -1254,7 +1257,12 @@ function mostrarCrearManual(){
     const cod=val.trim().toUpperCase();
     if(nombresPorCodigo[cod] && !nombreCampo.value){ nombreCampo.value=nombresPorCodigo[cod]; }
   });
-  armarAutocomplete('man-nombre','man-nombre-sugs',nombresConocidos);
+  armarAutocomplete('man-nombre','man-nombre-sugs',nombresConocidos, (val)=>{
+    const skuCampo=document.getElementById('man-sku');
+    if(skuCampo.value)return; // no pisar si el usuario ya puso un SKU a mano
+    const cod=Object.keys(nombresPorCodigo).find(c=>nombresPorCodigo[c]===val);
+    if(cod){ skuCampo.value=cod; }
+  });
   // Si el SKU elegido ya tiene un nombre conocido, completa el nombre solo
   // (sin pisar lo que el usuario ya haya escrito a mano) — también al tipear.
   document.getElementById('man-sku').addEventListener('input', function(){
