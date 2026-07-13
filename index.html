@@ -1259,6 +1259,7 @@ function mostrarCrearManual(){
     if(nombresPorCodigo[cod] && (!nombreCampo.value || nombreCampo.value===ultimoAutoNombre)){
       nombreCampo.value=nombresPorCodigo[cod];
       ultimoAutoNombre=nombresPorCodigo[cod];
+      destellar(nombreCampo);
     }
   });
   armarAutocomplete('man-nombre','man-nombre-sugs',nombresConocidos, (val)=>{
@@ -1267,17 +1268,28 @@ function mostrarCrearManual(){
     if(cod && (!skuCampo.value || skuCampo.value===ultimoAutoSku)){
       skuCampo.value=cod;
       ultimoAutoSku=cod;
+      destellar(skuCampo);
     }
   });
   // Si el SKU tipeado (letra por letra, sin elegir de la lista) coincide con
   // uno conocido, completa el nombre — y lo sigue actualizando mientras el
   // usuario no haya escrito algo distinto a mano en ese campo.
+  function destellar(el){
+    el.style.transition='background-color .15s';
+    el.style.backgroundColor='rgba(147,51,234,.25)';
+    setTimeout(()=>{ el.style.backgroundColor=''; }, 500);
+  }
   document.getElementById('man-sku').addEventListener('input', function(){
     const cod=this.value.trim().toUpperCase();
     const nombreCampo=document.getElementById('man-nombre');
     if(nombresPorCodigo[cod] && (!nombreCampo.value || nombreCampo.value===ultimoAutoNombre)){
       nombreCampo.value=nombresPorCodigo[cod];
       ultimoAutoNombre=nombresPorCodigo[cod];
+      destellar(nombreCampo);
+      // Cierra el desplegable de sugerencias: ya encontramos coincidencia
+      // exacta, y si sigue abierto tapa visualmente el campo Nombre que
+      // acabamos de completar, dando la sensación de que "no pasó nada".
+      document.getElementById('man-sku-sugs').style.display='none';
     }
   });
   document.getElementById('man-tipo').addEventListener('change', function(){
