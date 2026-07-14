@@ -58,7 +58,7 @@ window._fbReady = fbReady;
 window._fbFns = { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp };
 </script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
 
 /* ===== TOKENS ===== */
 :root{
@@ -79,7 +79,7 @@ html.dark{
 }
 
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s;}
+body{font-family:'Poppins',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s;}
 
 /* ===== HEADER ===== */
 header{
@@ -137,14 +137,14 @@ nav{display:flex;flex-direction:column;gap:3px;padding:18px 12px;width:200px;fle
 label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
 input,select,textarea{
   background:var(--surface2);border:1px solid var(--border);border-radius:8px;
-  padding:9px 12px;color:var(--text);font-size:13px;font-family:'Inter',sans-serif;
+  padding:9px 12px;color:var(--text);font-size:13px;font-family:'Poppins',sans-serif;
   transition:border-color .15s;
 }
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
 select option{background:var(--surface);}
 
 /* ===== BUTTONS ===== */
-.btn{padding:9px 20px;border-radius:999px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;transition:all .15s;display:inline-flex;align-items:center;gap:7px;}
+.btn{padding:9px 20px;border-radius:999px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:'Poppins',sans-serif;transition:all .15s;display:inline-flex;align-items:center;gap:7px;}
 .btn-primary{background:var(--accent-grad);color:#fff;box-shadow:0 2px 8px rgba(124,58,237,.35);}
 html.dark .btn-primary{color:#fff;}
 .btn-primary:hover{filter:brightness(1.08);}
@@ -323,6 +323,7 @@ tr:hover td{background:var(--surface2);}
   <button class="tab" onclick="showPanel('stock',this)">📊 Stock Depósito</button>
   <button class="tab" onclick="showPanel('inventario',this)">📋 Inventario</button>
   <button class="tab" onclick="showPanel('centum',this)">🔗 Exportar Centum</button>
+  <button class="tab" onclick="showPanel('historial',this)">🕘 Historial</button>
 </nav>
 
 <div class="content">
@@ -501,7 +502,18 @@ tr:hover td{background:var(--surface2);}
     </div>
     <button class="btn btn-primary" onclick="exportarCSV('produccion')">⬇ Exportar CSV — Producción</button>
   </div>
-  <div class="card"><div class="card-title">Historial</div><div id="tabla-exportaciones"><div class="empty"><div class="empty-icon">📄</div>Sin exportaciones</div></div></div>
+  <div class="card"><div class="card-title">Historial de exportaciones</div><div id="tabla-exportaciones"><div class="empty"><div class="empty-icon">📄</div>Sin exportaciones</div></div></div>
+</div>
+
+<div class="panel" id="panel-historial">
+  <div class="info-box"><strong>🕘 Historial de acciones</strong><br>Registro permanente de todo lo que se hace en el sistema (importaciones, generación de etiquetas, escaneos, eliminaciones, etc.) — se guarda aunque recargues la página.</div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+      <input type="text" id="search-historial" placeholder="Buscar en el historial..." oninput="renderHistorial()" style="flex:1;min-width:200px;">
+      <button class="btn btn-outline btn-sm" style="color:var(--red);border-color:var(--red);" onclick="borrarHistorial()">🗑 Borrar historial</button>
+    </div>
+    <div id="lista-historial"></div>
+  </div>
 </div>
 
 </div><!-- /content -->
@@ -539,11 +551,13 @@ const NOMBRES_REFERENCIA = {"MUECAM00303":"Cama Superpuesta Plena C/Func y techo
 // ===== STATE =====
 let productos = JSON.parse(storageGet('mbt_productos', '[]'));
 let exportaciones = JSON.parse(storageGet('mbt_exportaciones', '[]'));
+let historial = JSON.parse(storageGet('mbt_historial', '[]'));
 let importRows = [];
 let filtroActivo = 'todos';
 let scanners = {};
 let lastScanned = {};
 let unsubscribe = null;
+let unsubscribeHistorial = null;
 
 // ===== FIREBASE INIT =====
 function initFirebase() {
@@ -580,6 +594,15 @@ function initFirebase() {
     // hasta que alguien recargue la página a mano.
     setTimeout(()=>{ initFirebase(); }, 5000);
   });
+
+  // Historial: mismo patrón de sincronización en tiempo real que los bultos.
+  if(typeof unsubscribeHistorial==='function'){ try{unsubscribeHistorial();}catch(e){} }
+  const qh = query(collection(db, 'historial'), orderBy('ts','desc'));
+  unsubscribeHistorial = onSnapshot(qh, (snap) => {
+    historial = snap.docs.map(d => d.data());
+    storageSet('mbt_historial', JSON.stringify(historial));
+    if (document.getElementById('panel-historial')?.classList.contains('active')) renderHistorial();
+  }, (err) => { console.warn('Firestore error (historial):', err); });
 }
 
 async function fbSave(prod) {
@@ -610,6 +633,30 @@ function save() {
   updateStats();
 }
 
+// Registra una acción en el historial permanente (queda guardado aunque se
+// recargue la página, y se sincroniza entre dispositivos si Firebase está
+// configurado). No confundir con el estado de cada bulto (eso ya se ve en
+// Inventario) — esto es un registro cronológico de TODAS las acciones.
+async function registrarHistorial(accion, detalle){
+  const entry={
+    id:Math.random().toString(36).substring(2,10),
+    ts:new Date().toISOString(),
+    accion, detalle
+  };
+  historial.unshift(entry);
+  if(historial.length>500) historial=historial.slice(0,500);
+  storageSet('mbt_historial', JSON.stringify(historial));
+  if(document.getElementById('panel-historial')?.classList.contains('active')) renderHistorial();
+
+  const db=window._db;
+  const fbReady=window._fbReady;
+  if(fbReady && db && window._fbFns){
+    const { collection, addDoc, serverTimestamp } = window._fbFns;
+    try{ await addDoc(collection(db,'historial'), {...entry, _ts:serverTimestamp()}); }
+    catch(e){ console.error('Error guardando historial:',e); }
+  }
+}
+
 // ===== NAV =====
 function showPanel(name, el) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -621,6 +668,7 @@ function showPanel(name, el) {
   if (name==='stock') renderStockCards();
   if (name==='etiquetas') renderEtiquetas();
   if (name==='centum') { renderExportaciones(); setDefaultDates(); }
+  if (name==='historial') renderHistorial();
 }
 
 function setDefaultDates() {
@@ -708,6 +756,7 @@ function parseCentumWorkbook(wb) {
   const p=importRows.filter(r=>r.tipo==='pedido').length;
   const s=importRows.filter(r=>r.tipo==='stock').length;
   toast(`✅ ${importRows.length} productos — ${p} pedidos · ${s} stock`,'success');
+  registrarHistorial('Importación', `Se importaron ${importRows.length} productos del Excel (${p} pedidos, ${s} stock)`);
 }
 
 function renderImportPreview() {
@@ -829,6 +878,7 @@ async function generarEtiquetasDesdeImport() {
     save();
     if(btn){ btn.textContent='⚡ Generar Etiquetas'; btn.disabled=false; }
     toast(`✅ ${total} etiquetas generadas`,'success');
+    registrarHistorial('Generación', `Se generaron ${total} etiquetas nuevas`);
     showPanel('etiquetas',document.querySelectorAll('.tab')[1]);
   } catch(err) {
     console.error('Error en generarEtiquetasDesdeImport:', err);
@@ -1104,6 +1154,7 @@ async function ejecutarReinicioTotal(){
   renderStockCards();
   renderEtiquetas();
   toast('🔄 Sistema reiniciado','success');
+  registrarHistorial('Reinicio total', `Se borraron ${aBorrar.length} bultos (todos los estados)`);
 
   const db=window._db;
   const fbReady=window._fbReady;
@@ -1126,6 +1177,7 @@ async function ejecutarLimpiezaEtiquetas() {
   save();
   renderEtiquetas();
   toast('🗑 Etiquetas limpiadas','success');
+  registrarHistorial('Limpieza', `Se borraron ${aBorrar.length} etiquetas pendientes de Fábrica`);
 
   const db=window._db;
   const fbReady=window._fbReady;
@@ -1333,6 +1385,7 @@ async function ejecutarCrearManual(){
   updateStats();
   showPanel('etiquetas',null);
   toast(`✏️ ${cant} etiqueta${cant>1?'s':''} creada${cant>1?'s':''} para "${nombre}"`,'success');
+  registrarHistorial('Creación manual', `${cant} etiqueta${cant>1?"s":""} creada${cant>1?"s":""} para "${nombre}" (SKU: ${sku||"—"})`);
 
   for(const np of nuevos){ await fbSave(np); }
 }
@@ -1407,6 +1460,7 @@ async function ejecutarAgregarBultos(codigo){
   renderInventario();
   renderStockCards();
   toast(`➕ ${cantExtra} bulto${cantExtra>1?'s':''} agregado${cantExtra>1?'s':''} — total ahora ${totalNuevo}`,'success');
+  registrarHistorial('Agregar bultos', `${p.tipo}: se agregaron ${cantExtra} bultos (de ${totalViejo} a ${totalNuevo})`);
 
   const db=window._db;
   const fbReady=window._fbReady;
@@ -1426,6 +1480,7 @@ async function ejecutarEliminarProducto(codigo){
   renderInventario();
   renderStockCards();
   toast('🗑 Bulto eliminado','success');
+  registrarHistorial('Eliminación', `Se eliminó ${p.tipo} (${codigo})`);
 
   const db=window._db;
   const fbReady=window._fbReady;
@@ -1527,6 +1582,7 @@ async function procesarScan(raw,tipo){
     resultEl.innerHTML=resultHTML('✅ Salida registrada',prod,[['Hora',formatHora(ahora)],['Estado',estadoBadge('transito')]])+avisoBultosFaltantes(pendSalida);
     agregarFila('salidas',prod);
     toast(`🚛 ${prod.tipo}${prod.bultoNum?' — Bulto '+prod.bultoNum+'/'+prod.bultosTotal:''}`, 'success');
+    registrarHistorial('Salida Fábrica', `${prod.tipo}${prod.bultoNum?` — bulto ${prod.bultoNum}/${prod.bultosTotal}`:''} (${prod.codigo})`);
     if(pendSalida) toast(`⚠️ Faltan ${pendSalida.faltan} bulto${pendSalida.faltan>1?'s':''} de este pedido`,'error');
   } else {
     if(prod.estado!=='transito'){resultEl.className='scan-result not-found';resultEl.innerHTML=estadoIncorrecto(prod,'No está en Tránsito');return;}
@@ -1537,6 +1593,7 @@ async function procesarScan(raw,tipo){
     resultEl.innerHTML=resultHTML('✅ Recepción confirmada',prod,[['Salió',formatFecha(prod.fechaSalida)],['Recibido',formatHora(ahora)],['Estado',estadoBadge('deposito')]])+avisoBultosFaltantes(pendEntrada);
     agregarFila('entradas',prod);renderStockCards();
     toast(`🏭 Recibido: ${prod.tipo}`,'success');
+    registrarHistorial('Recepción', `${prod.tipo}${prod.bultoNum?` — bulto ${prod.bultoNum}/${prod.bultosTotal}`:''} (${prod.codigo})`);
     if(pendEntrada) toast(`⚠️ Faltan ${pendEntrada.faltan} bulto${pendEntrada.faltan>1?'s':''} de este pedido`,'error');
   }
 }
@@ -1659,6 +1716,52 @@ function renderExportaciones(){
   const c=document.getElementById('tabla-exportaciones');
   if(!exportaciones.length){c.innerHTML=`<div class="empty"><div class="empty-icon">📄</div>Sin exportaciones</div>`;return;}
   c.innerHTML=`<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Archivo</th><th>Registros</th></tr></thead><tbody>${exportaciones.map(e=>`<tr><td style="font-size:11px;">${formatFecha(e.fecha)}</td><td><span class="badge badge-dep">${e.tipo}</span></td><td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);">${e.nombre}</td><td style="text-align:center;">${e.registros}</td></tr>`).join('')}</tbody></table>`;
+}
+function renderHistorial(){
+  const search=(document.getElementById('search-historial')?.value||'').toLowerCase();
+  const cont=document.getElementById('lista-historial');
+  if(!cont)return;
+  const lista=historial.filter(h=>!search||h.accion.toLowerCase().includes(search)||h.detalle.toLowerCase().includes(search));
+  if(!lista.length){
+    cont.innerHTML=`<div class="empty"><div class="empty-icon">🕘</div>Sin movimientos registrados todavía</div>`;
+    return;
+  }
+  cont.innerHTML=lista.map(h=>`
+    <div style="display:flex;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);align-items:flex-start;">
+      <div style="font-size:10px;color:var(--muted);white-space:nowrap;min-width:105px;">${formatFecha(h.ts)}</div>
+      <div style="flex:1;">
+        <span style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;">${h.accion}</span>
+        <div style="font-size:13px;margin-top:2px;">${h.detalle}</div>
+      </div>
+    </div>
+  `).join('');
+}
+function borrarHistorial(){
+  if(!historial.length){ toast('El historial ya está vacío','error'); return; }
+  const overlay=document.createElement('div');
+  overlay.id='confirm-borrar-hist-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:400px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span style="font-size:24px;">🗑</span>
+        <h3 style="font-size:16px;font-weight:700;margin:0;">Borrar historial</h3>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">Se van a borrar los ${historial.length} registros del historial. Esto no afecta a los bultos ni a las etiquetas, solo el registro de acciones.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-outline" onclick="document.getElementById('confirm-borrar-hist-overlay').remove()">Cancelar</button>
+        <button class="btn" style="background:var(--red);color:#fff;" onclick="ejecutarBorrarHistorial()">🗑 Borrar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function ejecutarBorrarHistorial(){
+  document.getElementById('confirm-borrar-hist-overlay')?.remove();
+  historial=[];
+  storageSet('mbt_historial', JSON.stringify(historial));
+  renderHistorial();
+  toast('🗑 Historial borrado','success');
 }
 function agregarFila(tipo,prod){
   const id=tipo==='salidas'?'tabla-salidas':'tabla-entradas';
