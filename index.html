@@ -1992,7 +1992,18 @@ function toggleTheme(){
 
 // ===== BOOT =====
 renderStockCards();
-initAuthListener();
+function esperarFirebaseListo(intentos){
+  intentos = intentos || 0;
+  if (typeof window._fbReady !== 'undefined') {
+    initAuthListener();
+  } else if (intentos < 100) {
+    setTimeout(()=>esperarFirebaseListo(intentos+1), 50);
+  } else {
+    // Después de 5s largos, asumimos que Firebase no cargó y arrancamos en modo local
+    initAuthListener();
+  }
+}
+esperarFirebaseListo();
 </script>
 </body>
 </html>
